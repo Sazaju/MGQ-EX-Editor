@@ -1,15 +1,21 @@
 package fr.sazaju.mgqeditor;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Iterator;
-import java.util.NoSuchElementException;
+import java.util.LinkedHashSet;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 import java.util.logging.Logger;
 
 import org.apache.commons.lang3.NotImplementedException;
 
+import fr.sazaju.mgqeditor.MGQProject.MGQEntry;
 import fr.sazaju.mgqeditor.MGQProject.MGQMap;
 import fr.sazaju.mgqeditor.MGQProject.MapID;
 import fr.vergne.translation.TranslationEntry;
@@ -17,12 +23,14 @@ import fr.vergne.translation.TranslationMap;
 import fr.vergne.translation.TranslationMetadata;
 import fr.vergne.translation.TranslationMetadata.Field;
 import fr.vergne.translation.TranslationProject;
+import fr.vergne.translation.impl.NoTranslationFilter;
 import fr.vergne.translation.impl.PatternFileMap;
 import fr.vergne.translation.impl.PatternFileMap.PatternEntry;
 import fr.vergne.translation.util.EntryFilter;
 import fr.vergne.translation.util.Feature;
+import fr.vergne.translation.util.MapNamer;
 
-public class MGQProject implements TranslationProject<MapID, MGQMap> {
+public class MGQProject implements TranslationProject<MGQEntry, MapID, MGQMap> {
 
 	private static final Logger logger = Logger.getLogger(MGQProject.class
 			.getName());
@@ -32,10 +40,34 @@ public class MGQProject implements TranslationProject<MapID, MGQMap> {
 	}
 
 	private final File directory;
+	private final Collection<MapNamer<MapID>> mapNamers;
+	private final Collection<EntryFilter<MGQEntry>> filters;
+	private final Field<String> idField = new Field<>("ID");
 
 	public MGQProject(File directory) {
 		logger.info("Creating Project on " + directory);
 		this.directory = directory;
+		this.mapNamers = new LinkedHashSet<>();
+		this.mapNamers.add(new MapNamer<MapID>() {
+
+			@Override
+			public String getName() {
+				return "Type";
+			}
+
+			@Override
+			public String getDescription() {
+				return "Use the type of data stored in the map to name it.";
+			}
+
+			@Override
+			public String getNameFor(MapID id) {
+				return id.name();
+			}
+		});
+
+		this.filters = new LinkedList<EntryFilter<MGQEntry>>();
+		this.filters.add(new NoTranslationFilter<MGQEntry>());
 	}
 
 	@Override
@@ -46,7 +78,7 @@ public class MGQProject implements TranslationProject<MapID, MGQMap> {
 	@Override
 	public MGQMap getMap(MapID id) {
 		logger.info("Building map " + id + "...");
-		String entryRegex = "(?<=\n\n)<<(?s:.*?)(?=\n\n<<|\n{0,3}$)";
+		String entryRegex = "(?<=\n{1,2})<<(?s:.*?)(?=\n\n<<|\n{0,3}$)";
 		String contentRegex = "(?<=>>\n)(?s:.*+)$";
 		String absentRegex = "(?<=>>)(?=\n)";
 
@@ -65,7 +97,6 @@ public class MGQProject implements TranslationProject<MapID, MGQMap> {
 			throw new RuntimeException("Unmanaged map id: " + id);
 		}
 
-		Field<String> idField = new Field<>("ID");
 		String idRegex = "(?<=<<).*(?=>>)";
 
 		logger.fine("Loading Japanese...");
@@ -80,29 +111,30 @@ public class MGQProject implements TranslationProject<MapID, MGQMap> {
 		englishMap.addFieldRegex(idField, idRegex, false);
 		logger.fine("English loaded: " + englishMap.size() + " entries.");
 
-		int size = Math.min(japaneseMap.size(), englishMap.size());
-		for (int i = 0; i < size; i++) {
-			PatternEntry jap = japaneseMap.getEntry(i);
-			PatternEntry eng = englishMap.getEntry(i);
-			String idJap = jap.getMetadata().get(idField);
-			String idEng = eng.getMetadata().get(idField);
-
-			String equal = "";
-			if (idJap.equals(idEng)) {
-				equal += "O";
-			} else {
-				equal += "X";
-			}
-
-			System.out.println(equal + " " + idJap + " > " + idEng);
+		List<String> sortedIds = new ArrayList<>(japaneseMap.size());
+		Map<String, PatternEntry> japaneseEntries = new HashMap<>();
+		for (PatternEntry entry : japaneseMap) {
+			String entryId = entry.getMetadata().get(idField);
+			sortedIds.add(entryId);
+			japaneseEntries.put(entryId, entry);
 		}
 
-		return new MGQMap(japaneseMap, englishMap);
+		Map<String, PatternEntry> englishEntries = new HashMap<>();
+		for (PatternEntry entry : englishMap) {
+			String entryId = entry.getMetadata().get(idField);
+			if (japaneseEntries.containsKey(entryId)) {
+				englishEntries.put(entryId, entry);
+			} else {
+				// obsolete English entry
+			}
+		}
+
+		return new MGQMap(sortedIds, japaneseEntries, englishEntries);
 	}
 
 	@Override
-	public String getMapName(MapID id) {
-		return id.name();
+	public Collection<MapNamer<MapID>> getMapNamers() {
+		return mapNamers;
 	}
 
 	@Override
@@ -127,36 +159,39 @@ public class MGQProject implements TranslationProject<MapID, MGQMap> {
 		return Collections.emptyList();
 	}
 
-	public static class MGQMap implements TranslationMap<MGQEntry> {
+	@Override
+	public Collection<EntryFilter<MGQEntry>> getEntryFilters() {
+		return filters;
+	}
 
-		private final PatternFileMap japaneseMap;
-		private final PatternFileMap englishMap;
+	public class MGQMap implements TranslationMap<MGQEntry> {
 
-		public MGQMap(PatternFileMap japaneseMap, PatternFileMap englishMap) {
-			this.japaneseMap = japaneseMap;
-			this.englishMap = englishMap;
+		private final List<String> sortedIds;
+		private final Map<String, PatternEntry> japaneseEntries;
+		private final Map<String, PatternEntry> englishEntries;
+
+		public MGQMap(List<String> sortedIds,
+				Map<String, PatternEntry> japaneseEntries,
+				Map<String, PatternEntry> englishEntries) {
+			this.sortedIds = sortedIds;
+			this.japaneseEntries = japaneseEntries;
+			this.englishEntries = englishEntries;
 		}
 
 		@Override
 		public Iterator<MGQEntry> iterator() {
 			return new Iterator<MGQEntry>() {
 
-				private final int maxIndex = englishMap.size() - 1;
-				private int index = -1;
+				private final Iterator<String> iterator = sortedIds.iterator();
 
 				@Override
 				public boolean hasNext() {
-					return index < maxIndex;
+					return iterator.hasNext();
 				}
 
 				@Override
 				public MGQEntry next() {
-					if (hasNext()) {
-						index++;
-						return getEntry(index);
-					} else {
-						throw new NoSuchElementException();
-					}
+					return getEntry(iterator.next());
 				}
 
 				@Override
@@ -169,14 +204,18 @@ public class MGQProject implements TranslationProject<MapID, MGQMap> {
 
 		@Override
 		public MGQEntry getEntry(int index) {
-			PatternEntry japaneseEntry = japaneseMap.getEntry(index);
-			PatternEntry englishEntry = englishMap.getEntry(index);
+			return getEntry(sortedIds.get(index));
+		}
+
+		private MGQEntry getEntry(String id) {
+			PatternEntry japaneseEntry = japaneseEntries.get(id);
+			PatternEntry englishEntry = englishEntries.get(id);
 			return new MGQEntry(japaneseEntry, englishEntry);
 		}
 
 		@Override
 		public int size() {
-			return englishMap.size();
+			return sortedIds.size();
 		}
 
 		@Override
@@ -191,21 +230,21 @@ public class MGQProject implements TranslationProject<MapID, MGQMap> {
 			throw new NotImplementedException("Not implemented yet.");
 		}
 
-		@Override
-		public Collection<EntryFilter<MGQEntry>> getEntryFilters() {
-			return Collections.emptyList();
-		}
-
 	}
 
-	public static class MGQEntry implements TranslationEntry<MGQMetadata> {
+	public class MGQEntry implements TranslationEntry<MGQMetadata> {
 
 		private final PatternEntry japaneseEntry;
 		private final PatternEntry englishEntry;
 
 		public MGQEntry(PatternEntry japaneseEntry, PatternEntry englishEntry) {
-			this.japaneseEntry = japaneseEntry;
-			this.englishEntry = englishEntry;
+			if (englishEntry == null) {
+				throw new IllegalArgumentException("No English entry for "
+						+ japaneseEntry.getMetadata().get(idField));
+			} else {
+				this.japaneseEntry = japaneseEntry;
+				this.englishEntry = englishEntry;
+			}
 		}
 
 		@Override
