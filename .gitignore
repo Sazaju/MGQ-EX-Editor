@@ -6,3 +6,5 @@ bin
 target
 MGQ-EX
 *.ini
+*.log
+logging.properties
