@@ -62,10 +62,10 @@ public class MGQEditor extends Editor<MapID, MGQEntry, MGQMap, MGQProject> {
 			throw new RuntimeException(e);
 		}
 
-		new Runnable() {
+		new Thread(new Runnable() {
 			public void run() {
 				new MGQEditor().setVisible(true);
 			}
-		}.run();
+		}).start();
 	}
 }
