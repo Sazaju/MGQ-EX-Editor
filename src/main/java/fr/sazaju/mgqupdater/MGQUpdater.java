@@ -27,18 +27,19 @@ public class MGQUpdater {
 
 	private static final Logger logger = Logger.getLogger(MGQUpdater.class
 			.getName());
+	private final Field<String> idField = new Field<>("ID");
+	private List<String> sortedIds;
+	private Map<String, PatternEntry> japaneseEntries;
+	private Map<String, PatternEntry> englishEntries;
 
-	public MGQUpdater(File japaneseFile, File englishFile)
-			throws FileNotFoundException {
-		final Field<String> idField = new Field<>("ID");
-
-		logger.info("Loading Japanese file " + japaneseFile + "...");
-		PatternFileMap japaneseMap = new PatternFileMap(japaneseFile,
+	private void loadJapanese(File file) {
+		logger.info("Loading Japanese file " + file + "...");
+		PatternFileMap japaneseMap = new PatternFileMap(file,
 				MGQProject.REGEX_ENTRY, MGQProject.REGEX_CONTENT,
 				MGQProject.REGEX_ABSENT);
 		japaneseMap.addFieldRegex(idField, MGQProject.REGEX_ID, false);
-		List<String> sortedIds = new ArrayList<>(japaneseMap.size());
-		Map<String, PatternEntry> japaneseEntries = new HashMap<>();
+		sortedIds = new ArrayList<>(japaneseMap.size());
+		japaneseEntries = new HashMap<>();
 		for (PatternEntry entry : japaneseMap) {
 			String entryId = entry.getMetadata().get(idField);
 			sortedIds.add(entryId);
@@ -46,28 +47,36 @@ public class MGQUpdater {
 			logger.finest("- Entry retrieved: " + entryId);
 		}
 		logger.info("Japanese loaded: " + japaneseMap.size() + " entries.");
+	}
 
-		logger.info("Loading English file " + englishFile + "...");
-		PatternFileMap englishMap = new PatternFileMap(englishFile,
+	private void loadEnglish(File file) {
+		logger.info("Loading English file " + file + "...");
+		PatternFileMap englishMap = new PatternFileMap(file,
 				MGQProject.REGEX_ENTRY, MGQProject.REGEX_ABSENT,
 				MGQProject.REGEX_CONTENT);
 		englishMap.addFieldRegex(idField, MGQProject.REGEX_ID, false);
-		Map<String, PatternEntry> englishEntries = new LinkedHashMap<>();
+		englishEntries = new LinkedHashMap<>();
 		for (PatternEntry entry : englishMap) {
 			String entryId = entry.getMetadata().get(idField);
 			englishEntries.put(entryId, entry);
 			logger.finest("- Entry retrieved: " + entryId);
 		}
 		logger.info("English loaded: " + englishMap.size() + " entries.");
+	}
 
-		File newEnglishFile = new File(englishFile.getParentFile(),
-				englishFile.getName() + ".new");
-		logger.info("Writing new English file " + newEnglishFile + "...");
-		PrintStream newStream = new PrintStream(newEnglishFile);
+	private void writeNewEnglish(File file) {
+		logger.info("Writing new English file " + file + "...");
+		PrintStream printer;
+		try {
+			printer = new PrintStream(file);
+		} catch (FileNotFoundException e) {
+			throw new RuntimeException(e);
+		}
+		int done = 0;
 		for (String id : sortedIds) {
 			logger.finest("- Entry " + id);
-			PatternEntry japaneseEntry = japaneseEntries.remove(id);
-			PatternEntry englishEntry = englishEntries.remove(id);
+			PatternEntry japaneseEntry = japaneseEntries.get(id);
+			PatternEntry englishEntry = englishEntries.get(id);
 
 			String printString;
 			if (englishEntry != null) {
@@ -77,29 +86,38 @@ public class MGQUpdater {
 				printString = japaneseEntry.rebuildString();
 				logger.finest("- Store Japanese version");
 			}
-			newStream.print("\n\n" + printString);
+			printer.print("\n\n" + printString);
+			done++;
 		}
-		newStream.close();
-		logger.info("New English file written: " + englishEntries.size()
-				+ " entries remaining");
+		printer.close();
+		logger.info("New English file written: " + done + " entries");
+	}
 
-		if (englishEntries.size() <= 0) {
-			logger.info("No unused English entries.");
-		} else {
-			File unusedEnglishFile = new File(englishFile.getParentFile(),
-					englishFile.getName() + ".unused");
-			logger.info("Writing unused English file " + unusedEnglishFile
-					+ "...");
-			PrintStream unusedStream = new PrintStream(unusedEnglishFile);
-			for (PatternEntry englishEntry : englishEntries.values()) {
-				logger.finest("- Entry "
-						+ englishEntry.getMetadata().get(idField));
-				unusedStream.print("\n\n" + englishEntry.rebuildString());
-			}
-			unusedStream.close();
-			logger.info("Unused English file written: " + englishEntries.size()
-					+ " entries");
+	private void writeUnusedEnglish(File file) {
+		logger.info("Writing unused English file " + file + "...");
+		PrintStream printer;
+		try {
+			printer = new PrintStream(file);
+		} catch (FileNotFoundException e) {
+			throw new RuntimeException(e);
 		}
+		int done = 0;
+		for (PatternEntry englishEntry : englishEntries.values()) {
+			String id = englishEntry.getMetadata().get(idField);
+			if (japaneseEntries.containsKey(id)) {
+				// used, so ignore
+			} else {
+				logger.finest("- Entry " + id);
+				printer.print("\n\n" + englishEntry.rebuildString());
+				done++;
+			}
+		}
+		printer.close();
+		logger.info("Unused English file written: " + done + " entries");
+	}
+
+	protected boolean hasUnused() {
+		return !japaneseEntries.keySet().containsAll(englishEntries.keySet());
 	}
 
 	public static void main(String[] args) throws Exception {
@@ -147,7 +165,21 @@ public class MGQUpdater {
 							"ScriptTextJapanese.rvtext");
 					File englishFile = new File(directory,
 							"ScriptTextEnglish.rvtext");
-					new MGQUpdater(japaneseFile, englishFile);
+					File newEnglishFile = new File(englishFile.getParentFile(),
+							englishFile.getName() + ".new");
+					File unusedEnglishFile = new File(
+							englishFile.getParentFile(), englishFile.getName()
+									+ ".unused");
+
+					MGQUpdater updater = new MGQUpdater();
+					updater.loadJapanese(japaneseFile);
+					updater.loadEnglish(englishFile);
+					updater.writeNewEnglish(newEnglishFile);
+					if (updater.hasUnused()) {
+						updater.writeUnusedEnglish(unusedEnglishFile);
+					} else {
+						logger.info("No unused English entries.");
+					}
 				} catch (Exception e) {
 					logger.log(Level.SEVERE, null, e);
 				}
