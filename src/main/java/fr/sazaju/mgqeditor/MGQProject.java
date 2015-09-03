@@ -34,6 +34,10 @@ public class MGQProject implements TranslationProject<MGQEntry, MapID, MGQMap> {
 
 	private static final Logger logger = Logger.getLogger(MGQProject.class
 			.getName());
+	public static final String REGEX_ENTRY = "(?<=\n{1,2})<<(?s:.*?)(?=\n\n<<|\n{0,3}$)";
+	public static final String REGEX_CONTENT = "(?<=>>\n)(?s:.*+)$";
+	public static final String REGEX_ABSENT = "(?<=>>)(?=\n)";
+	public static final String REGEX_ID = "(?<=<<).*(?=>>)";
 
 	public static enum MapID {
 		DATABASE, DIALOGUES, SCRIPT_TEXT
@@ -78,9 +82,6 @@ public class MGQProject implements TranslationProject<MGQEntry, MapID, MGQMap> {
 	@Override
 	public MGQMap getMap(MapID id) {
 		logger.info("Building map " + id + "...");
-		String entryRegex = "(?<=\n{1,2})<<(?s:.*?)(?=\n\n<<|\n{0,3}$)";
-		String contentRegex = "(?<=>>\n)(?s:.*+)$";
-		String absentRegex = "(?<=>>)(?=\n)";
 
 		File japaneseFile;
 		File englishFile;
@@ -97,18 +98,16 @@ public class MGQProject implements TranslationProject<MGQEntry, MapID, MGQMap> {
 			throw new RuntimeException("Unmanaged map id: " + id);
 		}
 
-		String idRegex = "(?<=<<).*(?=>>)";
-
 		logger.fine("Loading Japanese...");
 		PatternFileMap japaneseMap = new PatternFileMap(japaneseFile,
-				entryRegex, contentRegex, absentRegex);
-		japaneseMap.addFieldRegex(idField, idRegex, false);
+				REGEX_ENTRY, REGEX_CONTENT, REGEX_ABSENT);
+		japaneseMap.addFieldRegex(idField, REGEX_ID, false);
 		logger.fine("Japanese loaded: " + japaneseMap.size() + " entries.");
 
 		logger.fine("Loading English...");
-		PatternFileMap englishMap = new PatternFileMap(englishFile, entryRegex,
-				absentRegex, contentRegex);
-		englishMap.addFieldRegex(idField, idRegex, false);
+		PatternFileMap englishMap = new PatternFileMap(englishFile, REGEX_ENTRY,
+				REGEX_ABSENT, REGEX_CONTENT);
+		englishMap.addFieldRegex(idField, REGEX_ID, false);
 		logger.fine("English loaded: " + englishMap.size() + " entries.");
 
 		List<String> sortedIds = new ArrayList<>(japaneseMap.size());

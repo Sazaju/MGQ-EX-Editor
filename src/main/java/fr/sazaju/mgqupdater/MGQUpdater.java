@@ -18,6 +18,7 @@ import java.util.logging.Logger;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
 
+import fr.sazaju.mgqeditor.MGQProject;
 import fr.vergne.translation.TranslationMetadata.Field;
 import fr.vergne.translation.impl.PatternFileMap;
 import fr.vergne.translation.impl.PatternFileMap.PatternEntry;
@@ -29,17 +30,13 @@ public class MGQUpdater {
 
 	public MGQUpdater(File japaneseFile, File englishFile)
 			throws FileNotFoundException {
-		String entryRegex = "(?<=\n{1,2})<<(?s:.*?)(?=\n\n<<|\n{0,3}$)";
-		String contentRegex = "(?<=>>\n)(?s:.*+)$";
-		String absentRegex = "(?<=>>)(?=\n)";
-
 		final Field<String> idField = new Field<>("ID");
-		String idRegex = "(?<=<<).*(?=>>)";
 
 		logger.info("Loading Japanese file " + japaneseFile + "...");
 		PatternFileMap japaneseMap = new PatternFileMap(japaneseFile,
-				entryRegex, contentRegex, absentRegex);
-		japaneseMap.addFieldRegex(idField, idRegex, false);
+				MGQProject.REGEX_ENTRY, MGQProject.REGEX_CONTENT,
+				MGQProject.REGEX_ABSENT);
+		japaneseMap.addFieldRegex(idField, MGQProject.REGEX_ID, false);
 		List<String> sortedIds = new ArrayList<>(japaneseMap.size());
 		Map<String, PatternEntry> japaneseEntries = new HashMap<>();
 		for (PatternEntry entry : japaneseMap) {
@@ -51,9 +48,10 @@ public class MGQUpdater {
 		logger.info("Japanese loaded: " + japaneseMap.size() + " entries.");
 
 		logger.info("Loading English file " + englishFile + "...");
-		PatternFileMap englishMap = new PatternFileMap(englishFile, entryRegex,
-				absentRegex, contentRegex);
-		englishMap.addFieldRegex(idField, idRegex, false);
+		PatternFileMap englishMap = new PatternFileMap(englishFile,
+				MGQProject.REGEX_ENTRY, MGQProject.REGEX_ABSENT,
+				MGQProject.REGEX_CONTENT);
+		englishMap.addFieldRegex(idField, MGQProject.REGEX_ID, false);
 		Map<String, PatternEntry> englishEntries = new LinkedHashMap<>();
 		for (PatternEntry entry : englishMap) {
 			String entryId = entry.getMetadata().get(idField);
