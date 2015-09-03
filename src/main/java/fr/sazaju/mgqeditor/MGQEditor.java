@@ -59,8 +59,7 @@ public class MGQEditor extends Editor<MapID, MGQEntry, MGQMap, MGQProject> {
 			try {
 				printer.println(FileUtils.readFileToString(file));
 			} catch (IOException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
+				throw new RuntimeException(e);
 			}
 		} else {
 			// use only default configuration
